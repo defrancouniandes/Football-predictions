@@ -21,7 +21,9 @@ setwd("D:/Uniandes/OneDrive - Universidad de los andes/Mis tablas de Excel")
 #En "datos" se guardan los inputs con los que se entranará el modelo
 datos <- read_xlsx("jugadores SOFA.xlsx")
 #En "predictions" se carga la base sobre la cual se espera hacer las predicciones
-predictions <- read_xlsx("CopaAmerica2.xlsx")
+#predictions <- read_xlsx("Equipos favoritos.xlsx")
+predictions <- read_xlsx("Sel_colombia.xlsx") 
+
 
 #La liga y la posición se trabajan como factores (variables categóricas)
 datos$Liga <- as.factor(datos$Liga)
@@ -184,27 +186,30 @@ ggplot(importancia, aes(x=reorder(variable,importancia), y=importancia,fill=impo
 #####6. Se entrena el modelo XGBoost que a priori supone ser el más robusto#####
 
 #Se define la grilla de hiperparámetros
-grid_default <- expand.grid(nrounds = seq(600, 1000, 50),
-                            max_depth = c(5, 7),
-                            eta = seq(0.03, 0.1, 0.005),
-                            gamma = c(0,1),
-                            min_child_weight = c(50, 100),
-                            colsample_bytree = c(0.7, 1),
-                            subsample = c(0.8, 1))
-
-#Se define una semilla
+grid_default <- expand.grid(nrounds = seq(300, 600, 100),  # Lower iterations for faster training
+                            max_depth = c(3, 5),  # Shallow trees generalize better & train faster
+                            eta = seq(0.05, 0.1, 0.01),  # Conservative learning rate
+                            gamma = c(0, 1),  # Minimal regularization
+                            min_child_weight = c(10, 50),  # Reduce overfitting
+                            colsample_bytree = c(0.8),  # Prevent overfitting, good balance for 10 predictors
+                            subsample = c(0.8))  # Slight stochasticity
+#
+#
+#
+#
+# #Se define una semilla
 set.seed(1998)
-
-#Se define 5 folds para el Cv
-ctrl <- trainControl(method = "cv", number = 5)
-
-#Se utilizan n-1 núcleos del computador debido a la exigencia de entrenar este modelo
+#
+# #Se define 5 folds para el Cv
+ctrl <- trainControl(method = "cv", number = 5, search = "grid")
+#
+# #Se utilizan n-1 núcleos del computador debido a la exigencia de entrenar este modelo
 n_cores <- detectCores()
 cl <- makePSOCKcluster(n_cores-1)
 registerDoParallel(cl)
-
-
-# Se crea una barra de progreso para hacer seguimiento del avance
+#
+#
+# # Se crea una barra de progreso para hacer seguimiento del avance
 n_iter <- 10 # Number of iterations of the loop
 
 pb <- txtProgressBar(min = 0,      # Valor mínimo barra de progreso
@@ -212,22 +217,22 @@ pb <- txtProgressBar(min = 0,      # Valor mínimo barra de progreso
                      style = 3,    # Estilo de la barra de progreso (1, 2 o 3)
                      width = 50,   # Ancho de la barra de progreso
                      char = "=")   # Caracter utilizado para el diseño de la bara
-
+#
 for(i in 1:n_iter) {
-  
-  #---------------------
-  # Acá se inserta el código que se corre para conocer su progreso con la barra
-  #---------------------
-  
+  #
+  #   #---------------------
+  #   # Acá se inserta el código que se corre para conocer su progreso con la barra
+  #   #---------------------
+  #
   xgboost <- train(Puntaje_daca ~ .,
-                  data = train%>%select(-Jugador),
-                  method = "xgbTree",
-                  trControl = ctrl,
-                  metric = "RMSE",
-                  tuneGrid = grid_default,
-                  preProcess = c("center", "scale"),
-                  verbose = FALSE,
-                  verbosity = 0)
+                   data = train%>%select(-Jugador),
+                   method = "xgbTree",
+                   trControl = ctrl,
+                   metric = "RMSE",
+                   tuneGrid = grid_default,
+                   preProcess = c("center", "scale"),
+                   verbose = FALSE,
+                   verbosity = 0)
   
   #---------------------
   
@@ -275,9 +280,10 @@ ggplot(variableimp, aes(x=reorder(Variable,Overall), y=Overall,fill=Overall))+
 #####8. Se juntan todas las predicciones en un solo puntaje final con el promedio#####
 
 #Se crea el puntaje promedio
-predictions <- predictions%>%mutate(pred_final = round((predicciones_puntaje_rf1 +
-                                                          predicciones_puntaje_rf2+
-                                                          predicciones_puntaje_XG)/3,2))
+predictions <- predictions %>%
+  mutate(pred_final = round(rowMeans(select(., predicciones_puntaje_rf1, predicciones_puntaje_rf2, predicciones_puntaje_XG)), 2))%>%
+  mutate(pred_promedio = round(rowMeans(select(., predicciones_puntaje_XG, pred_final)), 2))
+
 
 #Ver la tabla de predicciones unicamente con el nombre del jugador y los 4 puntajes creados
 View(predictions%>%dplyr::select(Jugador, predicciones_puntaje_rf1, predicciones_puntaje_rf2,
